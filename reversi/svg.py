@@ -7,7 +7,7 @@ from typing import Optional, Dict, TYPE_CHECKING
 if TYPE_CHECKING:
     from .core import Board, Color, Square
 
-from .core import BLACK, WHITE, square_file, square_rank, SQUARES
+from .core import BLACK, WHITE, square_file, square_rank
 
 DEFAULT_SIZE = 400
 MARGIN = 20
@@ -39,7 +39,9 @@ def board(
     if colors:
         c.update(colors)
 
-    cell = (size - 2 * MARGIN) / 8 if coordinates else size / 8
+    n = board.size if board is not None else 8
+
+    cell = (size - 2 * MARGIN) / n if coordinates else size / n
     margin = MARGIN if coordinates else 0
     total = size
 
@@ -53,34 +55,35 @@ def board(
     # Background
     parts.append(
         f'<rect x="{margin}" y="{margin}" '
-        f'width="{cell * 8}" height="{cell * 8}" '
+        f'width="{cell * n}" height="{cell * n}" '
         f'fill="{c["board"]}"/>'
     )
 
     # Grid lines
-    for i in range(9):
+    for i in range(n + 1):
         x = margin + i * cell
         parts.append(
-            f'<line x1="{x}" y1="{margin}" x2="{x}" y2="{margin + cell * 8}" '
+            f'<line x1="{x}" y1="{margin}" x2="{x}" y2="{margin + cell * n}" '
             f'stroke="{c["grid"]}" stroke-width="1"/>'
         )
         y = margin + i * cell
         parts.append(
-            f'<line x1="{margin}" y1="{y}" x2="{margin + cell * 8}" y2="{y}" '
+            f'<line x1="{margin}" y1="{y}" x2="{margin + cell * n}" y2="{y}" '
             f'stroke="{c["grid"]}" stroke-width="1"/>'
         )
 
     # Coordinates
     if coordinates:
-        for i, letter in enumerate("abcdefgh"):
+        for i in range(n):
+            letter = chr(ord('a') + i)
             x = margin + (i + 0.5) * cell
             parts.append(
                 f'<text x="{x}" y="{total - 4}" '
                 f'text-anchor="middle" font-size="11" '
                 f'fill="{c["coords"]}" font-family="sans-serif">{letter}</text>'
             )
-        for i in range(8):
-            y = margin + (7.5 - i) * cell
+        for i in range(n):
+            y = margin + (n - 1.5 - i) * cell
             parts.append(
                 f'<text x="{8}" y="{y + 4}" '
                 f'text-anchor="middle" font-size="11" '
@@ -89,9 +92,10 @@ def board(
 
     # Last move highlight
     if lastmove is not None:
-        lf, lr = square_file(lastmove), square_rank(lastmove)
+        lf = square_file(lastmove, n)
+        lr = square_rank(lastmove, n)
         lx = margin + lf * cell
-        ly = margin + (7 - lr) * cell
+        ly = margin + (n - 1 - lr) * cell
         parts.append(
             f'<rect x="{lx}" y="{ly}" width="{cell}" height="{cell}" '
             f'fill="{c["lastmove"]}"/>'
@@ -101,9 +105,10 @@ def board(
     if show_legal and board is not None:
         for move in board.legal_moves:
             if move.square is not None:
-                mf, mr = square_file(move.square), square_rank(move.square)
+                mf = square_file(move.square, n)
+                mr = square_rank(move.square, n)
                 mx = margin + (mf + 0.5) * cell
-                my = margin + (7 - mr + 0.5) * cell
+                my = margin + (n - 1 - mr + 0.5) * cell
                 parts.append(
                     f'<circle cx="{mx}" cy="{my}" r="{cell * 0.15}" '
                     f'fill="{c["legal"]}"/>'
@@ -112,13 +117,13 @@ def board(
     # Discs
     if board is not None:
         r = cell * 0.42
-        for sq in SQUARES:
+        for sq in range(n * n):
             disc = board.disc_at(sq)
             if disc is None:
                 continue
-            f, rk = square_file(sq), square_rank(sq)
+            f, rk = square_file(sq, n), square_rank(sq, n)
             cx = margin + (f + 0.5) * cell
-            cy = margin + (7 - rk + 0.5) * cell
+            cy = margin + (n - 1 - rk + 0.5) * cell
             if disc.color == BLACK:
                 fill, stroke = c["black_disc"], c["black_stroke"]
             else:

@@ -19,6 +19,7 @@ COLOR_NAMES = {BLACK: "black", WHITE: "white"}
 
 Square = int
 
+# 8x8 square constants for backward compatibility
 SQUARES = [
     A1, B1, C1, D1, E1, F1, G1, H1,
     A2, B2, C2, D2, E2, F2, G2, H2,
@@ -40,22 +41,35 @@ FILE_NAMES = "abcdefgh"
 RANK_NAMES = "12345678"
 
 
-def square_name(square: Square) -> str:
-    return SQUARE_NAMES[square]
+def square_name(square: Square, size: int = 8) -> str:
+    file = square % size
+    rank = square // size
+    return f"{chr(ord('a') + file)}{rank + 1}"
 
 
-def square_file(square: Square) -> int:
-    return square % 8
+def square_file(square: Square, size: int = 8) -> int:
+    return square % size
 
 
-def square_rank(square: Square) -> int:
-    return square // 8
+def square_rank(square: Square, size: int = 8) -> int:
+    return square // size
 
 
-def parse_square(name: str) -> Square:
-    if len(name) != 2 or name[0] not in FILE_NAMES or name[1] not in RANK_NAMES:
+def parse_square(name: str, size: int = 8) -> Square:
+    if len(name) < 2:
         raise ValueError(f"invalid square name: {name!r}")
-    return FILE_NAMES.index(name[0]) + RANK_NAMES.index(name[1]) * 8
+    file_ch = name[0].lower()
+    rank_str = name[1:]
+    file_idx = ord(file_ch) - ord('a')
+    if file_idx < 0 or file_idx >= size:
+        raise ValueError(f"invalid square name: {name!r}")
+    try:
+        rank_idx = int(rank_str) - 1
+    except ValueError:
+        raise ValueError(f"invalid square name: {name!r}")
+    if rank_idx < 0 or rank_idx >= size:
+        raise ValueError(f"invalid square name: {name!r}")
+    return rank_idx * size + file_idx
 
 
 # --- Directions ---
@@ -103,11 +117,11 @@ class Move:
         return cls(square=None)
 
     @classmethod
-    def from_str(cls, s: str) -> Move:
+    def from_str(cls, s: str, size: int = 8) -> Move:
         s = s.strip().lower()
         if s in ("pass", "pa", "--"):
             return cls.pass_move()
-        return cls(parse_square(s))
+        return cls(parse_square(s, size))
 
     def is_pass(self) -> bool:
         return self.square is None
@@ -191,7 +205,7 @@ class LegalMoveGenerator:
 
     def _generate(self) -> list[Move]:
         moves = []
-        for sq in SQUARES:
+        for sq in range(self._board.size * self._board.size):
             if self._board._is_legal(sq, self._board.turn):
                 moves.append(Move(sq))
         return moves
@@ -200,28 +214,48 @@ class LegalMoveGenerator:
 # --- Board ---
 
 class Board:
-    """An 8x8 reversi board.
+    """An NxN reversi board (default 8x8).
 
     Mirrors the python-chess Board API: push/pop moves, legal_moves generator,
     turn flag, ASCII/SVG display, game-over detection, and copy.
     """
 
-    def __init__(self, setup: bool = True) -> None:
-        self._grid: list[Optional[Disc]] = [None] * 64
+    def __init__(self, *, size: int = 8, fen: Optional[str] = None) -> None:
+        if fen is not None:
+            size = len(fen.strip().split()[0].split("/"))
+        if size < 4 or size > 26 or size % 2 != 0:
+            raise ValueError("board size must be an even number between 4 and 26")
+        self.size: int = size
+        self._grid: list[Optional[Disc]] = [None] * (size * size)
         self.turn: Color = BLACK
-        self.move_stack: list[tuple[Move, list[Square], Color]] = []
+        self.move_stack: list[tuple[Move, list[Square], Color, bool]] = []
 
-        if setup:
+        if fen is not None:
+            self.set_fen(fen)
+        else:
             self._setup()
 
+    @classmethod
+    def empty(cls, *, size: int = 8) -> Board:
+        """Create a blank board with no discs placed."""
+        board = cls.__new__(cls)
+        if size < 4 or size > 26 or size % 2 != 0:
+            raise ValueError("board size must be an even number between 4 and 26")
+        board.size = size
+        board._grid = [None] * (size * size)
+        board.turn = BLACK
+        board.move_stack = []
+        return board
+
     def _setup(self) -> None:
-        self._grid[D4] = Disc(WHITE)
-        self._grid[E4] = Disc(BLACK)
-        self._grid[D5] = Disc(BLACK)
-        self._grid[E5] = Disc(WHITE)
+        mid = self.size // 2
+        self._grid[(mid - 1) * self.size + (mid - 1)] = Disc(WHITE)
+        self._grid[(mid - 1) * self.size + mid] = Disc(BLACK)
+        self._grid[mid * self.size + (mid - 1)] = Disc(BLACK)
+        self._grid[mid * self.size + mid] = Disc(WHITE)
 
     def clear(self) -> None:
-        self._grid = [None] * 64
+        self._grid = [None] * (self.size * self.size)
         self.turn = BLACK
         self.move_stack.clear()
 
@@ -241,11 +275,12 @@ class Board:
         self, square: Square, color: Color, dr: int, dc: int
     ) -> list[Square]:
         """Return squares of opponent discs captured in one direction."""
-        f, r = square_file(square), square_rank(square)
+        n = self.size
+        f, r = square_file(square, n), square_rank(square, n)
         captured: list[Square] = []
         cr, cc = r + dr, f + dc
-        while 0 <= cr < 8 and 0 <= cc < 8:
-            sq = cr * 8 + cc
+        while 0 <= cr < n and 0 <= cc < n:
+            sq = cr * n + cc
             disc = self._grid[sq]
             if disc is None:
                 return []
@@ -271,7 +306,20 @@ class Board:
     def has_legal_move(self, color: Optional[Color] = None) -> bool:
         if color is None:
             color = self.turn
-        return any(self._is_legal(sq, color) for sq in SQUARES)
+        return any(self._is_legal(sq, color) for sq in range(self.size * self.size))
+
+    def blocked_player(self) -> Optional[Color]:
+        """Return the color of the player who has no legal moves, or
+        ``None`` if both players can move.  When the game is over (neither
+        player can move) returns ``None`` as well — use
+        :meth:`is_game_over` for that case."""
+        black_can = self.has_legal_move(BLACK)
+        white_can = self.has_legal_move(WHITE)
+        if black_can and white_can:
+            return None
+        if not black_can and not white_can:
+            return None  # game over, not a single blocked player
+        return BLACK if not black_can else WHITE
 
     # --- Push / Pop ---
 
@@ -279,7 +327,7 @@ class Board:
         if move.is_pass():
             if self.has_legal_move():
                 raise ValueError("cannot pass when legal moves are available")
-            self.move_stack.append((move, [], self.turn))
+            self.move_stack.append((move, [], self.turn, False))
             self.turn = not self.turn
             return
 
@@ -287,7 +335,7 @@ class Board:
         assert sq is not None
 
         if self._grid[sq] is not None:
-            raise ValueError(f"square {square_name(sq)} is occupied")
+            raise ValueError(f"square {square_name(sq, self.size)} is occupied")
 
         captures = self._all_captures(sq, self.turn)
         if not captures:
@@ -297,14 +345,22 @@ class Board:
         for csq in captures:
             self._grid[csq] = Disc(self.turn)
 
-        self.move_stack.append((move, captures, self.turn))
+        color = self.turn
         self.turn = not self.turn
+
+        # Auto-skip: if the opponent has no legal moves but the game isn't
+        # over, give the current player another turn.
+        skipped = not self.has_legal_move() and not self.is_game_over()
+        if skipped:
+            self.turn = not self.turn
+
+        self.move_stack.append((move, captures, color, skipped))
 
     def pop(self) -> Move:
         if not self.move_stack:
             raise IndexError("pop from empty move stack")
 
-        move, captures, color = self.move_stack.pop()
+        move, captures, color, _skipped = self.move_stack.pop()
         self.turn = color
 
         if move.is_pass():
@@ -360,7 +416,7 @@ class Board:
     # --- Copy ---
 
     def copy(self, *, stack: Union[bool, int] = True) -> Board:
-        board = Board(setup=False)
+        board = Board.empty(size=self.size)
         board._grid = [copy.copy(d) for d in self._grid]
         board.turn = self.turn
 
@@ -376,19 +432,22 @@ class Board:
     # --- String representations ---
 
     def __str__(self) -> str:
+        n = self.size
+        rank_width = len(str(n))
         lines: list[str] = []
-        for rank in range(7, -1, -1):
+        for rank in range(n - 1, -1, -1):
             row = []
-            for file in range(8):
-                disc = self._grid[rank * 8 + file]
+            for file in range(n):
+                disc = self._grid[rank * n + file]
                 if disc is None:
                     row.append(".")
                 elif disc.color == BLACK:
                     row.append("X")
                 else:
                     row.append("O")
-            lines.append(f"{rank + 1} {' '.join(row)}")
-        lines.append("  a b c d e f g h")
+            lines.append(f"{rank + 1:>{rank_width}} {' '.join(row)}")
+        file_labels = " ".join(chr(ord('a') + f) for f in range(n))
+        lines.append(f"{' ' * rank_width} {file_labels}")
         return "\n".join(lines)
 
     def __repr__(self) -> str:
@@ -397,16 +456,19 @@ class Board:
     # --- FEN-like representation ---
 
     def fen(self) -> str:
-        """Return a FEN-like string: rows from rank 8 to 1, separated by /,
-        then a space and the side to move (b or w).
+        """Return a FEN-like string: rows from top rank to rank 1, separated
+        by ``/``, then a space and the side to move (``b`` or ``w``).
 
-        Empty squares are counted. X = black, O = white."""
+        Empty squares use run-length encoding (multi-digit for boards > 9).
+        ``X`` = black, ``O`` = white.
+        """
+        n = self.size
         rows: list[str] = []
-        for rank in range(7, -1, -1):
+        for rank in range(n - 1, -1, -1):
             row = ""
             empty = 0
-            for file in range(8):
-                disc = self._grid[rank * 8 + file]
+            for file in range(n):
+                disc = self._grid[rank * n + file]
                 if disc is None:
                     empty += 1
                 else:
@@ -427,24 +489,35 @@ class Board:
             raise ValueError(f"invalid FEN: {fen!r}")
 
         rows = parts[0].split("/")
-        if len(rows) != 8:
-            raise ValueError(f"invalid FEN: expected 8 rows, got {len(rows)}")
+        if len(rows) != self.size:
+            raise ValueError(
+                f"invalid FEN: expected {self.size} rows, got {len(rows)}"
+            )
 
-        self._grid = [None] * 64
+        n = self.size
+        self._grid = [None] * (n * n)
         self.move_stack.clear()
 
         for rank_idx, row in enumerate(rows):
-            rank = 7 - rank_idx
+            rank = n - 1 - rank_idx
             file = 0
-            for ch in row:
+            i = 0
+            while i < len(row):
+                ch = row[i]
                 if ch.isdigit():
-                    file += int(ch)
+                    j = i + 1
+                    while j < len(row) and row[j].isdigit():
+                        j += 1
+                    file += int(row[i:j])
+                    i = j
                 elif ch in ("X", "x"):
-                    self._grid[rank * 8 + file] = Disc(BLACK)
+                    self._grid[rank * n + file] = Disc(BLACK)
                     file += 1
+                    i += 1
                 elif ch in ("O", "o"):
-                    self._grid[rank * 8 + file] = Disc(WHITE)
+                    self._grid[rank * n + file] = Disc(WHITE)
                     file += 1
+                    i += 1
                 else:
                     raise ValueError(f"invalid FEN character: {ch!r}")
 
@@ -464,7 +537,11 @@ class Board:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Board):
-            return self._grid == other._grid and self.turn == other.turn
+            return (
+                self.size == other.size
+                and self._grid == other._grid
+                and self.turn == other.turn
+            )
         return NotImplemented
 
     def __hash__(self) -> int:
