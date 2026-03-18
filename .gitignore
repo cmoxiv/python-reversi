@@ -214,6 +214,7 @@ claude/
 .claude_*
 claude_*
 CLAUDE.md
+.bash_history
 
 # Planning / PRD
 *-prd/
