@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reversi"
+version = "0.1.0"
+description = "A pure-Python reversi (Othello) library inspired by python-chess."
+requires-python = ">=3.9"
+license = "MIT"
+
+[project.optional-dependencies]
+dev = ["pytest"]

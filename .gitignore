@@ -205,3 +205,17 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Claude Code
+.gitignore
+.claude/
+claude/
+*.claude
+.claude_*
+claude_*
+CLAUDE.md
+
+# Planning / PRD
+*-prd/
+implementation-plan.md
+PROJECT_CONTEXT.md
